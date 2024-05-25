@@ -1,0 +1,17 @@
+{
+    "id": "ModArrayInstructions1234",
+    "name": "Mod Array Instructions",
+    "version_name": "1.0",
+    "version_code": 1,
+    "author": "VW",
+    "homepage": "https://www.desyncedgame.com/",
+    "description": "Add Arrays to Desynced Programming",
+    "packages": {
+        "Data": {
+            "name": "Data",
+            "entry": "data.lua",
+            "dependencies": [ "Main/Data" ],
+            "type": "Addon"
+        }
+    }
+}

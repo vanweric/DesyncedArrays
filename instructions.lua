@@ -25,9 +25,9 @@ function Arrays_GetSubarray(comp, state, table_id)
     if comp.extra_data.arrays[ID] == nil then
         comp.extra_data.arrays[ID] = {}
     end
-    
+
     return comp.extra_data.arrays[ID]
-    
+
 end
 
 -- Helper func to clear a subarray and return a reference.
@@ -42,7 +42,7 @@ function Arrays_GetCleanSubarray(comp, state, table_id)
 
     comp.extra_data.arrays[ID] = {}
     return comp.extra_data.arrays[ID]
-    
+
 end
 function Arrays_Init(comp, state)
     comp.extra_data.arrays={}
@@ -58,8 +58,8 @@ data.instructions.mod_array_push =
         arr[#arr+1] = Tool.NewRegisterObject(Get(comp, state, value))
 	end,
 	args = {
-		{ "in", "Value", nil, "any" },
-		{ "in", "ID" , nil, "any"},
+		{ "in", "Value", "Value to be pushed to array", "any" },
+		{ "in", "ID" , "ArrayID", "any"},
 	},
 	name = "Array Push",
 	desc = "Pushes Input to the end of the array",
@@ -75,12 +75,12 @@ data.instructions.mod_array_set =
         arr[ix] = Tool.NewRegisterObject(Get(comp, state, value))
 	end,
 	args = {
-		{ "in", "Value", nil, "any" },
-		{ "in", "ID" , nil, "any"},
-		{ "in", "index" , nil, "num"},
+		{ "in", "Value", "Value ", "any" },
+		{ "in", "ID" , "ArrayID", "any"},
+		{ "in", "index" , "Index into Array", "num"},
 	},
 	name = "Array Set",
-	desc = "Set id[index]",
+	desc = "Set ArrayID[index]=Value",
 	category = "Array",
 	icon = "Main/skin/Icons/Special/Commands/Add Numbers.png",
 }
@@ -95,11 +95,11 @@ data.instructions.mod_array_get =
 	end,
 	args = {
 		{ "out", "Value", nil, "any" },
-		{ "in", "ID" , nil, "any"},
+		{ "in", "ArrayID" , nil, "any"},
 		{ "in", "index" , nil, "num"},
 	},
 	name = "Array Get",
-	desc = "returns id[index]",
+	desc = "Value = ArrayID[index]. \nSets to '0' if not present in array.",
 	category = "Array",
 	icon = "Main/skin/Icons/Special/Commands/Add Numbers.png",
 }
@@ -124,7 +124,7 @@ data.instructions.mod_array_pop =
 	end,
 	args = {
 		{ "out", "Value", nil, "any" },
-		{ "in", "ID" , nil, "any"},
+		{ "in", "ArrayID" , nil, "any"},
 	},
 	name = "Array Pop",
 	desc = "Removes and returns the last element in an array",
@@ -151,8 +151,8 @@ data.instructions.mod_array_length =
 		{ "out", "Value", nil, "any" },
 		{ "in", "ID" , nil, "any"},
 	},
-	name = "Array Length",
-	desc = "Measures the length of the Array",
+	name = "Array Count",
+	desc = "Counts the Elements in the Array (Sparse Vector Compatible)",
 	category = "Array",
 	icon = "Main/skin/Icons/Special/Commands/Add Numbers.png",
 }
@@ -161,19 +161,19 @@ data.instructions.mod_array_length =
 data.instructions.mod_array_clear =
 {
 	func = function(comp, state, cause, value, id)
-        local arr = Arrays_GetSubarray(comp, state, id)
-        local arr = {}
-
-	end,
+        local arr = Arrays_GetCleanSubarray(comp, state, id)
+        end,
 	args = {
-		{ "in", "ID" , nil, "any"},
+		{ "in", "ArrayID" , nil, "any"},
 	},
 	name = "Array Clear",
 	desc = "Removes all elements from an array, leaving it empty",
 	category = "Array",
-	icon = "Main/skin/Icons/Special/Commands/Add Numbers.png",
+	icon = "Main/skin/Icons/Common/56x56/Remove.png",
 }
 
+-- iterates over an array
+-- TODO: Support multiple arrays.
 data.instructions.mod_array_for_elements =
 {
 	func = function(comp, state, cause, id, value, index, exec_done)
@@ -190,7 +190,6 @@ data.instructions.mod_array_for_elements =
 		--for index in pairs(arr) do
 			it[#it+1] = {index, Tool.NewRegisterObject(arr[index])}
 		end
-		print(it)
 
 		return BeginBlock(comp, state, it)
 	end,
@@ -208,7 +207,7 @@ data.instructions.mod_array_for_elements =
 	end,
 
 	args = {
-		{ "in", "ID", "Signal" },
+		{ "in", "ArrayID", "Signal" },
 		{ "out", "Value", "Value from array" , "any"},
 		{ "out", "Index", "Current Index in array" , "num"},
 		{ "exec", "Done", "Finished looping through all entities with signal" },
@@ -221,90 +220,107 @@ data.instructions.mod_array_for_elements =
 	icon = "Main/skin/Icons/Special/Commands/Make Order.png",
 }
 
+
+-- Helper function ripped out of the existing source code.
+-- Should probably be a helper in the main library instead.
+local function RecipesHelper(comp, state, product)
+	local item_id = GetId(comp, state, product)
+	local product_def, ingredients = item_id and data.all[item_id]
+	local ent = not product_def and GetEntity(comp, state, product)
+
+	if product_def then
+		local production_recipe = product_def and (product_def.production_recipe or product_def.construction_recipe)
+		ingredients = production_recipe and production_recipe.ingredients
+
+		-- is Research (uplink_recipe)
+		if not ingredients then
+			production_recipe = product_def.uplink_recipe
+			ingredients = production_recipe and production_recipe.ingredients
+
+			if (ingredients) then
+				local is_unlocked = comp.faction:IsUnlocked(item_id)
+				local progress = comp.faction.extra_data.research_progress and comp.faction.extra_data.research_progress[item_id] or 0
+				local remain = (product_def.progress_count and product_def.progress_count or progress) - progress
+
+				if not is_unlocked and remain > 0 and ingredients then
+					local it = { 2 }
+					if ingredients then
+						-- return the remainder of the research, not just one stack
+						for item,n in pairs(ingredients) do
+							it[#it + 1] = { id = item, num = n*remain }
+						end
+
+						return BeginBlock(comp, state, it)
+					end
+				else
+					Set(comp, state, out_ingredient)
+					return
+				end
+			end
+		else
+			-- if not research and unlocked send the product
+			if not comp.faction:IsUnlocked(item_id) then
+				Set(comp, state, out_ingredient)
+				state.counter = exec_done
+				return
+			end
+		end
+	elseif ent then
+		if ent.def.id == "f_construction" then
+			local fd, bd = GetProduction(ent:GetRegisterId(FRAMEREG_GOTO), ent)
+			ingredients = GetConstructionIngredients(fd, bd)
+		else
+			if ent.def.convert_to then
+				-- unpacked items return their packaged form recipe instead
+				item_id = ent.def.convert_to
+			else
+				item_id = ent.def.id
+			end
+
+			if not comp.faction:IsUnlocked(item_id) then
+				Set(comp, state, out_ingredient)
+				state.counter = exec_done
+				return
+			end
+
+			-- from the entity get whether it's a bot or a building from the def.id
+			product_def = data.all[item_id]
+			local production_recipe = product_def and (product_def.production_recipe or product_def.construction_recipe)
+			ingredients = production_recipe and production_recipe.ingredients
+		end
+	end
+
+	if ingredients then
+		return ingredients
+	else
+		return {out_ingredient}
+	end
+
+end
+
+
 data.instructions.array_recipe_ingredients =
 {
 	func = function(comp, state, cause, product, id)
         local arr = Arrays_GetCleanSubarray(comp, state, id)
 
-		local item_id = GetId(comp, state, product)
-		local product_def, ingredients = item_id and data.all[item_id]
-		local ent = not product_def and GetEntity(comp, state, product)
+		local ingredients = RecipesHelper(comp, state, product)
+		local amount = GetNum(comp, state, product)
 
-		if product_def then
-			local production_recipe = product_def and (product_def.production_recipe or product_def.construction_recipe)
-			ingredients = production_recipe and production_recipe.ingredients
-
-			-- is Research (uplink_recipe)
-			if not ingredients then
-				production_recipe = product_def.uplink_recipe
-				ingredients = production_recipe and production_recipe.ingredients
-
-				if (ingredients) then
-					local is_unlocked = comp.faction:IsUnlocked(item_id)
-					local progress = comp.faction.extra_data.research_progress and comp.faction.extra_data.research_progress[item_id] or 0
-					local remain = (product_def.progress_count and product_def.progress_count or progress) - progress
-
-					if not is_unlocked and remain > 0 and ingredients then
-						local it = { 2 }
-						if ingredients then
-							-- return the remainder of the research, not just one stack
-							for item,n in pairs(ingredients) do
-								it[#it + 1] = { id = item, num = n*remain }
-							end
-
-							return BeginBlock(comp, state, it)
-						end
-					else
-						Set(comp, state, out_ingredient)
-						return
-					end
-				end
-			else
-				-- if not research and unlocked send the product
-				if not comp.faction:IsUnlocked(item_id) then
-					Set(comp, state, out_ingredient)
-					state.counter = exec_done
-					return
-				end
-			end
-		elseif ent then
-			if ent.def.id == "f_construction" then
-				local fd, bd = GetProduction(ent:GetRegisterId(FRAMEREG_GOTO), ent)
-				ingredients = GetConstructionIngredients(fd, bd)
-			else
-				if ent.def.convert_to then
-					-- unpacked items return their packaged form recipe instead
-					item_id = ent.def.convert_to
-				else
-					item_id = ent.def.id
-				end
-
-				if not comp.faction:IsUnlocked(item_id) then
-					Set(comp, state, out_ingredient)
-					state.counter = exec_done
-					return
-				end
-
-				-- from the entity get whether it's a bot or a building from the def.id
-				product_def = data.all[item_id]
-				local production_recipe = product_def and (product_def.production_recipe or product_def.construction_recipe)
-				ingredients = production_recipe and production_recipe.ingredients
-			end
+		if amount == nil or amount<1 then
+			amount = 1
 		end
-		print(ingredients)
-		print(out_ingredient)
+
 
 		if ingredients then
 			for item,n in pairs(ingredients) do
-				arr[#arr + 1] = Tool.NewRegisterObject({ id = item, num = n })
+				arr[#arr + 1] = Tool.NewRegisterObject({ id = item, num = n * amount })
 			end
-		else
-			arr[#arr + 1] = out_ingredient
 		end
 	end,
 
 	args = {
-		
+
 		{ "in", "Recipe" , nil, "any"},
 		{ "in", "ID" , nil, "any"},
 	},
@@ -313,3 +329,113 @@ data.instructions.array_recipe_ingredients =
 	category = "Array",
 	icon = "Main/skin/Icons/Special/Commands/Add Numbers.png",
 }
+
+-- TODO: Handle COORDS
+data.instructions.array_multiply_items =
+{
+	func = function(comp, state, cause, in1, scalar, id)
+		local in_arr = Arrays_GetSubarray(comp, state, in1)
+		local multiply_by = GetNum(comp, state, scalar)
+
+		local temp_arr = {}
+
+		for index, value in pairs(in_arr) do
+
+			temp_arr[index] = Tool.NewRegisterObject(value)
+			temp_arr[index].num = temp_arr[index].num * multiply_by
+		end
+
+		
+        local out_arr = Arrays_GetCleanSubarray(comp, state, id)
+		for index, value in pairs(temp_arr) do
+			
+			out_arr[index] = value
+			temp_arr[index] = nil
+		end
+		
+	end,
+
+	args = {
+
+		{ "in", "In1 ID" , "Array containing all the items to build", "any"},
+		{ "in", "Scalar" , "Scalar", "num"},
+		{ "in", "Out ID" , nil, "any"},
+	},
+	name = "Array Multiply Items",
+	desc = "ArrayOutID = ArrayInID * Scalar",
+	category = "Array",
+	icon = "Main/skin/Icons/Special/Commands/Add Numbers.png",
+}
+
+
+
+
+-- Reduces a single array down by merging by ID.
+data.instructions.array_merge_items =
+{
+	func = function(comp, state, cause, in1, id)
+
+		local in_arr = Arrays_GetSubarray(comp, state, in1)
+		local merge_list = {}
+
+		for _, value in pairs(in_arr) do
+			local id = value.id
+			if merge_list[id] then
+				merge_list[id].num = merge_list[id].num + value.num
+			else
+				merge_list[id] = value
+			end
+		end
+		
+        local out_arr = Arrays_GetCleanSubarray(comp, state, id)
+		for index, value in pairs(merge_list) do
+			out_arr[#out_arr+1] = Tool.NewRegisterObject(value)
+		end
+	end,
+
+	args = {
+		{ "in", "In ID" , "Source ArrayID to merge", "any"},
+		{ "in", "Out ID" , "ArrayID to write to", "any"},
+	},
+	name = "Array Merge Items",
+	desc = "Produces an Array that is the sum of it's inputs.  Ignores Indices.",
+	category = "Array",
+	icon = "Main/skin/Icons/Special/Commands/Add Numbers.png",
+}
+
+-- Reduces a single array down by merging by ID.
+data.instructions.array_concatenate =
+{
+	func = function(comp, state, cause, id, in1)
+		local in1_arr = Arrays_GetSubarray(comp, state, in1)
+		local in2_arr = Arrays_GetSubarray(comp, state, in2)
+		local merge_list = {}
+
+		for index, value in pairs(in1) do
+			merge_list[#merge_list+1] = Tool.RegisterNewObject(value)
+		end
+		for index, value in pairs(in2) do
+			merge_list[#merge_list+1] = Tool.RegisterNewObject(value)
+		end
+
+		-- Pull the output array late after creating the temp list in order to allow
+		-- for overlapping in and out references.
+		local out_arr = Arrays_GetCleanSubarray(comp, state, id)
+		for index, value in pairs(merge_list) do
+			out_arr[index] = value
+			merge_list[index] = nil
+		end
+	end,
+
+	args = {
+		{ "in", "Out ID" , nil, "any"},
+		{ "in", "In1 ID" , "Array containing all the items to build", "any"},
+		{ "in", "In2 ID" , "Array containing all the items to build", "any"},
+
+	},
+	name = "Array Concatenate",
+	desc = "Produces an Array that is the sum of it's inputs.  Ignores Indices.",
+	category = "Array",
+	icon = "Main/skin/Icons/Special/Commands/Add Numbers.png",
+}
+
